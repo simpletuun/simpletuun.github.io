@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>密码保护的日记时间线</title>
+    <title>密码保护的日记时间线 - GitHub同步版</title>
     <style>
         body { font-family: Arial; max-width: 800px; margin: 0 auto; padding: 20px; }
         .timeline { margin: 20px 0; display: none; }
@@ -28,16 +28,13 @@
             margin: 20px 0;
             text-align: center;
         }
-        .import-export, .github-sync {
+        .github-sync {
             margin: 30px 0;
             padding: 20px;
             background-color: #f5f5f5;
             border-radius: 5px;
         }
-        .import-export h2, .github-sync h2 {
-            margin-top: 0;
-        }
-        #importData, #githubTokenInput {
+        #githubTokenInput {
             width: 100%;
             height: 30px;
             margin: 10px 0;
@@ -56,10 +53,6 @@
             background-color: #f2dede;
             color: #a94442;
         }
-        .info {
-            background-color: #d9edf7;
-            color: #31708f;
-        }
         button {
             padding: 8px 15px;
             margin: 5px;
@@ -69,9 +62,6 @@
             border-radius: 4px;
             cursor: pointer;
         }
-        button:hover {
-            background-color: #4cae4c;
-        }
     </style>
 </head>
 <body>
@@ -79,31 +69,23 @@
     
     <div class="password-form">
         <input type="password" id="passwordInput" placeholder="输入密码查看日记">
-        <button id="passwordBtn" onclick="checkPassword()">解锁日记</button>
+        <button id="passwordBtn">解锁日记</button>
     </div>
     
     <div>
         <h2>写新日记</h2>
         <input type="date" id="entryDate"><br><br>
         <textarea id="entryContent" placeholder="今天发生了什么..."></textarea><br>
-        <button onclick="addEntry()">保存日记</button>
+        <button id="saveBtn">保存日记</button>
     </div>
     
     <div class="github-sync">
         <h2>GitHub 同步</h2>
         <input type="password" id="githubTokenInput" placeholder="GitHub个人访问令牌">
-        <button onclick="setupGistSync()">设置同步</button>
-        <button onclick="syncToGithub()">同步到GitHub</button>
-        <button onclick="loadFromGithub()">从GitHub加载</button>
-        <div id="githubStatus" class="status-message info">未设置GitHub同步</div>
-    </div>
-    
-    <div class="import-export">
-        <h2>本地备份</h2>
-        <button onclick="exportEntries()">导出日记</button>
-        <textarea id="importData" placeholder="粘贴导出的JSON数据"></textarea><br>
-        <button onclick="importEntries()">导入数据</button>
-        <div id="importExportStatus" class="status-message"></div>
+        <button id="setupSyncBtn">设置同步</button>
+        <button id="syncBtn">同步到GitHub</button>
+        <button id="loadBtn">从GitHub加载</button>
+        <div id="githubStatus" class="status-message">未设置GitHub同步</div>
     </div>
     
     <div class="timeline" id="timeline">
@@ -111,39 +93,75 @@
     </div>
 
     <script>
-        // 密码设置
+        // 配置常量
         const CORRECT_PASSWORD = "abc";
-        const DIARY_GIST_FILENAME = "my-secret-diary.json";
+        const DIARY_GIST_FILENAME = "my-diary-entries.json";
         
-        // GitHub同步变量
+        // 状态变量
         let githubToken = localStorage.getItem('github_token') || '';
         let gistId = localStorage.getItem('gist_id') || '';
         
-        // 初始化
-        document.getElementById('githubTokenInput').value = githubToken;
-        updateGithubStatus();
+        // DOM元素
+        const elements = {
+            passwordInput: document.getElementById('passwordInput'),
+            passwordBtn: document.getElementById('passwordBtn'),
+            entryDate: document.getElementById('entryDate'),
+            entryContent: document.getElementById('entryContent'),
+            saveBtn: document.getElementById('saveBtn'),
+            githubTokenInput: document.getElementById('githubTokenInput'),
+            setupSyncBtn: document.getElementById('setupSyncBtn'),
+            syncBtn: document.getElementById('syncBtn'),
+            loadBtn: document.getElementById('loadBtn'),
+            timeline: document.getElementById('timeline'),
+            status: document.getElementById('githubStatus')
+        };
         
-        // 检查密码函数
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            // 设置默认日期为今天
+            elements.entryDate.valueAsDate = new Date();
+            
+            // 加载保存的Token
+            elements.githubTokenInput.value = githubToken;
+            updateStatus();
+            
+            // 事件监听
+            elements.passwordBtn.addEventListener('click', checkPassword);
+            elements.saveBtn.addEventListener('click', addEntry);
+            elements.setupSyncBtn.addEventListener('click', setupGistSync);
+            elements.syncBtn.addEventListener('click', syncToGithub);
+            elements.loadBtn.addEventListener('click', loadFromGithub);
+            
+            // 初始化本地存储
+            if (!localStorage.getItem('diaryEntries')) {
+                localStorage.setItem('diaryEntries', JSON.stringify([]));
+            }
+        });
+        
+        // 密码检查
         function checkPassword() {
-            const input = document.getElementById('passwordInput').value;
-            if(input === CORRECT_PASSWORD) {
-                document.getElementById('timeline').style.display = 'block';
+            const input = elements.passwordInput.value;
+            if (input === CORRECT_PASSWORD) {
+                elements.timeline.style.display = 'block';
                 loadEntries();
             } else {
                 alert("密码错误！");
             }
         }
         
-        // 加载日记函数
+        // 加载日记
         function loadEntries() {
             try {
-                const entriesData = localStorage.getItem('diaryEntries');
-                const entries = entriesData ? JSON.parse(entriesData) : [];
-                const timeline = document.getElementById('timeline');
-                timeline.innerHTML = '';
+                const entries = JSON.parse(localStorage.getItem('diaryEntries') || []);
+                elements.timeline.innerHTML = '';
+                
+                if (entries.length === 0) {
+                    elements.timeline.innerHTML = '<p>暂无日记</p>';
+                    return;
+                }
                 
                 entries.forEach(entry => {
-                    timeline.innerHTML += `
+                    elements.timeline.innerHTML += `
                         <div class="entry">
                             <div class="date">${entry.date}</div>
                             <div class="content">${entry.content}</div>
@@ -151,293 +169,182 @@
                     `;
                 });
             } catch (error) {
-                console.error('加载日记出错:', error);
-                showStatus('importExportStatus', '加载日记出错: ' + error.message, 'error');
+                showStatus('加载日记出错: ' + error.message, 'error');
             }
         }
         
-        // 添加日记函数
+        // 添加日记
         async function addEntry() {
-            const date = document.getElementById('entryDate').value;
-            const content = document.getElementById('entryContent').value;
+            const date = elements.entryDate.value;
+            const content = elements.entryContent.value;
             
             if (!date || !content) {
-                showStatus('importExportStatus', '请填写日期和内容！', 'error');
+                showStatus('请填写日期和内容！', 'error');
                 return;
             }
             
             try {
-                const currentEntries = JSON.parse(
-                    localStorage.getItem('diaryEntries') || '[]'
-                );
-                currentEntries.unshift({ date, content });
-                localStorage.setItem('diaryEntries', JSON.stringify(currentEntries));
+                const entries = JSON.parse(localStorage.getItem('diaryEntries') || []);
+                entries.unshift({ date, content });
+                localStorage.setItem('diaryEntries', JSON.stringify(entries));
                 
-                document.getElementById('entryContent').value = '';
-                showStatus('importExportStatus', '日记已保存！', 'success');
+                elements.entryContent.value = '';
+                showStatus('日记已保存！', 'success');
+                loadEntries();
                 
-                if(document.getElementById('timeline').style.display === 'block') {
-                    loadEntries();
-                }
-                
-                // 自动同步到GitHub
-                if(githubToken && gistId) {
+                // 自动同步
+                if (githubToken && gistId) {
                     await syncToGithub();
                 }
             } catch (error) {
-                console.error('保存日记出错:', error);
-                showStatus('importExportStatus', '保存失败: ' + error.message, 'error');
+                showStatus('保存失败: ' + error.message, 'error');
             }
         }
         
-        // 导出日记函数
-        function exportEntries() {
-            try {
-                const entries = localStorage.getItem('diaryEntries');
-                if (!entries) {
-                    showStatus('importExportStatus', "没有可导出的日记", 'info');
-                    return;
-                }
-                
-                // 创建下载链接
-                const blob = new Blob([entries], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `diary-backup-${new Date().toISOString().slice(0,10)}.json`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                
-                showStatus('importExportStatus', "日记导出已开始下载", 'success');
-            } catch (error) {
-                console.error('导出失败:', error);
-                showStatus('importExportStatus', "导出失败: " + error.message, 'error');
-            }
-        }
-        
-        // 导入日记函数
-        function importEntries() {
-            try {
-                const importData = document.getElementById('importData').value.trim();
-                if (!importData) {
-                    showStatus('importExportStatus', "请粘贴要导入的JSON数据", 'info');
-                    return;
-                }
-                
-                const parsedData = JSON.parse(importData);
-                if (!Array.isArray(parsedData)) {
-                    throw new Error("数据格式不正确，应为日记数组");
-                }
-                
-                const currentEntries = JSON.parse(
-                    localStorage.getItem('diaryEntries') || '[]'
-                );
-                const combinedEntries = [...parsedData, ...currentData];
-                
-                localStorage.setItem('diaryEntries', JSON.stringify(combinedEntries));
-                showStatus('importExportStatus', `成功导入 ${parsedData.length} 条日记，现有 ${combinedEntries.length} 条`, 'success');
-                
-                if(document.getElementById('timeline').style.display === 'block') {
-                    loadEntries();
-                }
-            } catch (error) {
-                console.error('导入失败:', error);
-                showStatus('importExportStatus', "导入失败: " + error.message, 'error');
-            }
-        }
-        
-        // GitHub同步功能 ============================================
-        
-        // 设置GitHub同步
+        // GitHub同步功能
         async function setupGistSync() {
-            const token = document.getElementById('githubTokenInput').value.trim();
+            const token = elements.githubTokenInput.value.trim();
             if (!token) {
-                showStatus('githubStatus', '请输入GitHub访问令牌', 'error');
+                showStatus('请输入GitHub访问令牌', 'error');
                 return;
             }
             
-            githubToken = token;
-            localStorage.setItem('github_token', token);
-            
             try {
+                // 验证Token
+                const testRes = await fetch('https://api.github.com/user', {
+                    headers: { 
+                        'Authorization': `token ${token}`,
+                        'Accept': 'application/vnd.github.v3+json'
+                    }
+                });
+                
+                if (!testRes.ok) {
+                    throw new Error(testRes.status === 401 ? '无效的Token' : '验证失败');
+                }
+                
+                githubToken = token;
+                localStorage.setItem('github_token', token);
+                
                 // 检查是否已有Gist
                 if (gistId) {
-                    const confirmed = confirm("已存在同步的Gist，要使用现有Gist吗？点击取消创建新的Gist。");
-                    if (confirmed) {
+                    const useExisting = confirm("使用现有Gist? (取消将创建新Gist)");
+                    if (useExisting) {
                         await syncToGithub();
                         return;
                     }
                 }
                 
                 // 创建新Gist
-                const entries = JSON.parse(localStorage.getItem('diaryEntries') || '[]');
-                const response = await fetch('https://api.github.com/gists', {
+                const entries = JSON.parse(localStorage.getItem('diaryEntries') || []);
+                const res = await fetch('https://api.github.com/gists', {
                     method: 'POST',
                     headers: {
                         'Authorization': `token ${githubToken}`,
+                        'Accept': 'application/vnd.github.v3+json',
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        description: '我的私人日记备份',
+                        description: '我的日记备份',
                         public: false,
                         files: {
                             [DIARY_GIST_FILENAME]: {
                                 content: JSON.stringify({
                                     entries: entries,
-                                    lastUpdated: new Date().toISOString()
+                                    updatedAt: new Date().toISOString()
                                 })
                             }
                         }
                     })
                 });
                 
-                if (!response.ok) throw new Error('Gist创建失败: ' + response.status);
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.message || "创建失败");
                 
-                const data = await response.json();
                 gistId = data.id;
                 localStorage.setItem('gist_id', data.id);
-                
-                showStatus('githubStatus', '同步设置成功！Gist已创建。', 'success');
-                await syncToGithub();
+                showStatus('同步已设置! Gist ID: ' + data.id, 'success');
             } catch (error) {
-                console.error('Gist设置失败:', error);
-                showStatus('githubStatus', '设置失败: ' + error.message, 'error');
+                showStatus('设置失败: ' + error.message, 'error');
+                console.error("Gist设置失败:", error);
             }
         }
         
-        // 同步到GitHub
         async function syncToGithub() {
             if (!githubToken || !gistId) {
-                showStatus('githubStatus', '请先设置GitHub同步', 'error');
+                showStatus('请先设置同步', 'error');
                 return;
             }
             
             try {
-                // 获取现有Gist数据
-                const getResponse = await fetch(`https://api.github.com/gists/${gistId}`, {
-                    headers: {
-                        'Authorization': `token ${githubToken}`
-                    }
-                });
-                
-                if (!getResponse.ok) throw new Error('获取Gist失败: ' + getResponse.status);
-                
-                const gistData = await getResponse.json();
-                const remoteContent = gistData.files[DIARY_GIST_FILENAME].content;
-                const remoteData = JSON.parse(remoteContent);
-                const remoteEntries = remoteData.entries || [];
-                
-                // 合并本地和远程数据
-                const localEntries = JSON.parse(localStorage.getItem('diaryEntries') || []);
-                const allEntries = [...remoteEntries, ...localEntries];
-                
-                // 去重 - 基于日期和内容
-                const uniqueEntries = Array.from(
-                    new Set(allEntries.map(entry => JSON.stringify([entry.date, entry.content])))
-                    .map(str => JSON.parse(str))
-                    .map(([date, content]) => ({ date, content }));
-                
-                // 更新Gist
-                const updateResponse = await fetch(`https://api.github.com/gists/${gistId}`, {
+                const entries = JSON.parse(localStorage.getItem('diaryEntries') || []);
+                const res = await fetch(`https://api.github.com/gists/${gistId}`, {
                     method: 'PATCH',
                     headers: {
                         'Authorization': `token ${githubToken}`,
+                        'Accept': 'application/vnd.github.v3+json',
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        description: '我的私人日记备份 - 最后更新: ' + new Date().toLocaleString(),
                         files: {
                             [DIARY_GIST_FILENAME]: {
                                 content: JSON.stringify({
-                                    entries: uniqueEntries,
-                                    lastUpdated: new Date().toISOString()
+                                    entries: entries,
+                                    updatedAt: new Date().toISOString()
                                 })
                             }
                         }
                     })
                 });
                 
-                if (!updateResponse.ok) throw new Error('更新Gist失败: ' + updateResponse.status);
-                
-                // 更新本地存储
-                localStorage.setItem('diaryEntries', JSON.stringify(uniqueEntries));
-                showStatus('githubStatus', '同步成功！最后更新: ' + new Date().toLocaleString(), 'success');
-                
-                // 刷新显示
-                if (document.getElementById('timeline').style.display === 'block') {
-                    loadEntries();
-                }
+                if (!res.ok) throw new Error(await res.text());
+                showStatus('同步成功: ' + new Date().toLocaleString(), 'success');
             } catch (error) {
-                console.error('同步失败:', error);
-                showStatus('githubStatus', '同步失败: ' + error.message, 'error');
-                
-                // 如果Gist不存在，清除存储的gistId
-                if (error.message.includes('404')) {
-                    gistId = '';
-                    localStorage.removeItem('gist_id');
-                    updateGithubStatus();
-                }
+                showStatus('同步失败: ' + error.message, 'error');
             }
         }
         
-        // 从GitHub加载
         async function loadFromGithub() {
             if (!githubToken || !gistId) {
-                showStatus('githubStatus', '请先设置GitHub同步', 'error');
+                showStatus('请先设置同步', 'error');
                 return;
             }
             
             try {
-                const response = await fetch(`https://api.github.com/gists/${gistId}`, {
+                const res = await fetch(`https://api.github.com/gists/${gistId}`, {
                     headers: {
-                        'Authorization': `token ${githubToken}`
+                        'Authorization': `token ${githubToken}`,
+                        'Accept': 'application/vnd.github.v3+json'
                     }
                 });
                 
-                if (!response.ok) throw new Error('获取Gist失败: ' + response.status);
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.message || "加载失败");
                 
-                const gistData = await response.json();
-                const content = gistData.files[DIARY_GIST_FILENAME].content;
-                const data = JSON.parse(content);
+                const content = data.files[DIARY_GIST_FILENAME].content;
+                const parsed = JSON.parse(content);
                 
-                localStorage.setItem('diaryEntries', JSON.stringify(data.entries));
-                showStatus('githubStatus', '数据已从GitHub加载。最后更新: ' + new Date(data.lastUpdated).toLocaleString(), 'success');
-                
-                if (document.getElementById('timeline').style.display === 'block') {
-                    loadEntries();
-                }
+                localStorage.setItem('diaryEntries', JSON.stringify(parsed.entries));
+                showStatus('加载成功! 最后更新: ' + new Date(parsed.updatedAt).toLocaleString(), 'success');
+                loadEntries();
             } catch (error) {
-                console.error('加载失败:', error);
-                showStatus('githubStatus', '加载失败: ' + error.message, 'error');
+                showStatus('加载失败: ' + error.message, 'error');
             }
         }
         
-        // 更新GitHub状态显示
-        function updateGithubStatus() {
-            const statusElement = document.getElementById('githubStatus');
+        // 辅助函数
+        function updateStatus() {
             if (githubToken && gistId) {
-                statusElement.textContent = '已连接GitHub，Gist ID: ' + gistId;
-                statusElement.className = 'status-message success';
+                showStatus('已连接GitHub，Gist ID: ' + gistId, 'success');
             } else if (githubToken) {
-                statusElement.textContent = '已设置令牌，但未创建Gist';
-                statusElement.className = 'status-message info';
+                showStatus('已设置令牌，但未创建Gist', 'info');
             } else {
-                statusElement.textContent = '未设置GitHub同步';
-                statusElement.className = 'status-message info';
+                showStatus('未设置GitHub同步', 'info');
             }
         }
         
-        // 显示状态消息
-        function showStatus(elementId, message, type) {
-            const element = document.getElementById(elementId);
-            element.textContent = message;
-            element.className = 'status-message ' + type;
-        }
-        
-        // 初始化检查
-        if (!localStorage.getItem('diaryEntries')) {
-            localStorage.setItem('diaryEntries', JSON.stringify([]));
+        function showStatus(message, type) {
+            elements.status.textContent = message;
+            elements.status.className = 'status-message ' + type;
         }
     </script>
 </body>
