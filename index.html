@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>我的日记时间线</title>
+    <style>
+        body { font-family: Arial; max-width: 800px; margin: 0 auto; }
+        .timeline { margin: 20px 0; }
+        .entry { border-left: 3px solid #4CAF50; padding: 10px 20px; margin: 20px 0; }
+        .date { color: #666; font-size: 0.9em; }
+        .content { margin-top: 5px; }
+        textarea { width: 100%; height: 100px; }
+    </style>
+</head>
+<body>
+    <h1>我的日记</h1>
+    
+    <div>
+        <h2>写新日记</h2>
+        <input type="date" id="entryDate"><br><br>
+        <textarea id="entryContent" placeholder="今天发生了什么..."></textarea><br>
+        <button onclick="addEntry()">保存日记</button>
+    </div>
+    
+    <div class="timeline" id="timeline">
+        <!-- 日记会显示在这里 -->
+    </div>
+
+    <script>
+        // 加载保存的日记
+        function loadEntries() {
+            const entries = JSON.parse(localStorage.getItem('diaryEntries') || '[]');
+            const timeline = document.getElementById('timeline');
+            
+            entries.forEach(entry => {
+                timeline.innerHTML += `
+                    <div class="entry">
+                        <div class="date">${entry.date}</div>
+                        <div class="content">${entry.content}</div>
+                    </div>
+                `;
+            });
+        }
+        
+        // 添加新日记
+        function addEntry() {
+            const date = document.getElementById('entryDate').value;
+            const content = document.getElementById('entryContent').value;
+            
+            if (!date || !content) return;
+            
+            const entries = JSON.parse(localStorage.getItem('diaryEntries') || '[]');
+            entries.unshift({ date, content });
+            localStorage.setItem('diaryEntries', JSON.stringify(entries));
+            
+            // 刷新显示
+            document.getElementById('timeline').innerHTML = '';
+            loadEntries();
+            
+            // 清空输入
+            document.getElementById('entryContent').value = '';
+        }
+        
+        // 页面加载时显示已有日记
+        window.onload = loadEntries;
+    </script>
+</body>
+</html>
