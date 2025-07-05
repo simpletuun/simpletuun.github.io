@@ -53,6 +53,10 @@
             background-color: #f2dede;
             color: #a94442;
         }
+        .info {
+            background-color: #d9edf7;
+            color: #31708f;
+        }
         button {
             padding: 8px 15px;
             margin: 5px;
@@ -61,6 +65,17 @@
             border: none;
             border-radius: 4px;
             cursor: pointer;
+        }
+        .conflict-resolver {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            background-color: #f9f9f9;
+        }
+        .conflict-entry {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #eee;
         }
     </style>
 </head>
@@ -86,6 +101,15 @@
         <button id="syncBtn">同步到GitHub</button>
         <button id="loadBtn">从GitHub加载</button>
         <div id="githubStatus" class="status-message">未设置GitHub同步</div>
+        
+        <!-- 冲突解决界面 -->
+        <div id="conflictResolver" class="conflict-resolver" style="display:none;">
+            <h3>发现数据冲突</h3>
+            <div id="conflictEntries"></div>
+            <button id="resolveKeepLocal">保留我的更改</button>
+            <button id="resolveKeepRemote">使用云端版本</button>
+            <button id="resolveMerge">智能合并</button>
+        </div>
     </div>
     
     <div class="timeline" id="timeline">
@@ -96,10 +120,14 @@
         // 配置常量
         const CORRECT_PASSWORD = "abc";
         const DIARY_GIST_FILENAME = "my-diary-entries.json";
+        const SHARED_GIST_MARKER = "[DiaryApp-Shared]";
+        const SHARED_GIST_ID_FILE = "SHARED_GIST_ID.txt";
         
         // 状态变量
         let githubToken = localStorage.getItem('github_token') || '';
         let gistId = localStorage.getItem('gist_id') || '';
+        let currentDeviceId = localStorage.getItem('device_id') || generateDeviceId();
+        let isFirstDevice = false;
         
         // DOM元素
         const elements = {
@@ -113,7 +141,12 @@
             syncBtn: document.getElementById('syncBtn'),
             loadBtn: document.getElementById('loadBtn'),
             timeline: document.getElementById('timeline'),
-            status: document.getElementById('githubStatus')
+            status: document.getElementById('githubStatus'),
+            conflictResolver: document.getElementById('conflictResolver'),
+            conflictEntries: document.getElementById('conflictEntries'),
+            resolveKeepLocal: document.getElementById('resolveKeepLocal'),
+            resolveKeepRemote: document.getElementById('resolveKeepRemote'),
+            resolveMerge: document.getElementById('resolveMerge')
         };
         
         // 初始化
@@ -131,12 +164,22 @@
             elements.setupSyncBtn.addEventListener('click', setupGistSync);
             elements.syncBtn.addEventListener('click', syncToGithub);
             elements.loadBtn.addEventListener('click', loadFromGithub);
+            elements.resolveKeepLocal.addEventListener('click', () => resolveConflict('local'));
+            elements.resolveKeepRemote.addEventListener('click', () => resolveConflict('remote'));
+            elements.resolveMerge.addEventListener('click', () => resolveConflict('merge'));
             
             // 初始化本地存储
             if (!localStorage.getItem('diaryEntries')) {
                 localStorage.setItem('diaryEntries', JSON.stringify([]));
             }
         });
+        
+        // 生成设备ID
+        function generateDeviceId() {
+            const id = 'device_' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('device_id', id);
+            return id;
+        }
         
         // 密码检查
         function checkPassword() {
@@ -160,11 +203,15 @@
                     return;
                 }
                 
+                // 按日期降序排序
+                entries.sort((a, b) => new Date(b.date) - new Date(a.date));
+                
                 entries.forEach(entry => {
                     elements.timeline.innerHTML += `
                         <div class="entry">
                             <div class="date">${entry.date}</div>
                             <div class="content">${entry.content}</div>
+                            ${entry.deviceId ? `<small>来自设备: ${entry.deviceId}</small>` : ''}
                         </div>
                     `;
                 });
@@ -185,7 +232,12 @@
             
             try {
                 const entries = JSON.parse(localStorage.getItem('diaryEntries') || []);
-                entries.unshift({ date, content });
+                entries.unshift({ 
+                    date, 
+                    content,
+                    deviceId: currentDeviceId,
+                    createdAt: new Date().toISOString()
+                });
                 localStorage.setItem('diaryEntries', JSON.stringify(entries));
                 
                 elements.entryContent.value = '';
@@ -201,7 +253,9 @@
             }
         }
         
-        // GitHub同步功能
+        // GitHub同步功能 ============================================
+        
+        // 设置GitHub同步
         async function setupGistSync() {
             const token = elements.githubTokenInput.value.trim();
             if (!token) {
@@ -225,50 +279,101 @@
                 githubToken = token;
                 localStorage.setItem('github_token', token);
                 
-                // 检查是否已有Gist
-                if (gistId) {
-                    const useExisting = confirm("使用现有Gist? (取消将创建新Gist)");
-                    if (useExisting) {
-                        await syncToGithub();
-                        return;
+                // 查找共享Gist
+                const sharedGist = await findSharedGist();
+                
+                if (sharedGist) {
+                    // 已有共享Gist，获取内容Gist ID
+                    const contentGistId = await getContentGistId(sharedGist);
+                    gistId = contentGistId;
+                    localStorage.setItem('gist_id', contentGistId);
+                    
+                    showStatus('已连接到共享日记库', 'success');
+                    await loadFromGithub();
+                } else {
+                    // 没有共享Gist，创建新的
+                    isFirstDevice = true;
+                    if (confirm('未找到共享日记库，是否创建新的共享库？')) {
+                        await createNewSharedGist();
                     }
                 }
-                
-                // 创建新Gist
-                const entries = JSON.parse(localStorage.getItem('diaryEntries') || []);
-                const res = await fetch('https://api.github.com/gists', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `token ${githubToken}`,
-                        'Accept': 'application/vnd.github.v3+json',
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        description: '我的日记备份',
-                        public: false,
-                        files: {
-                            [DIARY_GIST_FILENAME]: {
-                                content: JSON.stringify({
-                                    entries: entries,
-                                    updatedAt: new Date().toISOString()
-                                })
-                            }
-                        }
-                    })
-                });
-                
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.message || "创建失败");
-                
-                gistId = data.id;
-                localStorage.setItem('gist_id', data.id);
-                showStatus('同步已设置! Gist ID: ' + data.id, 'success');
             } catch (error) {
                 showStatus('设置失败: ' + error.message, 'error');
                 console.error("Gist设置失败:", error);
             }
         }
         
+        // 查找共享Gist
+        async function findSharedGist() {
+            const response = await fetch('https://api.github.com/gists', {
+                headers: {
+                    'Authorization': `token ${githubToken}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            });
+            const gists = await response.json();
+            return gists.find(g => g.description.includes(SHARED_GIST_MARKER));
+        }
+        
+        // 获取内容Gist ID
+        async function getContentGistId(sharedGist) {
+            const fileUrl = sharedGist.files[SHARED_GIST_ID_FILE].raw_url;
+            const response = await fetch(fileUrl);
+            return await response.text();
+        }
+        
+        // 创建新的共享Gist系统
+        async function createNewSharedGist() {
+            // 1. 先创建内容Gist
+            const contentGist = await createGist({
+                description: '日记数据 - ' + currentDeviceId,
+                files: {
+                    [DIARY_GIST_FILENAME]: {
+                        content: JSON.stringify({
+                            entries: JSON.parse(localStorage.getItem('diaryEntries') || []),
+                            updatedAt: new Date().toISOString(),
+                            createdBy: currentDeviceId
+                        })
+                    }
+                }
+            });
+            
+            // 2. 创建共享Gist
+            const sharedGist = await createGist({
+                description: `${SHARED_GIST_MARKER} 请勿删除`,
+                files: {
+                    [SHARED_GIST_ID_FILE]: {
+                        content: contentGist.id
+                    }
+                }
+            });
+            
+            gistId = contentGist.id;
+            localStorage.setItem('gist_id', contentGist.id);
+            
+            showStatus('已创建共享日记库! Gist ID: ' + contentGist.id, 'success');
+        }
+        
+        // 通用Gist创建函数
+        async function createGist(data) {
+            const response = await fetch('https://api.github.com/gists', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `token ${githubToken}`,
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    public: false,
+                    ...data
+                })
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.message || "创建失败");
+            return result;
+        }
+        
+        // 同步到GitHub
         async function syncToGithub() {
             if (!githubToken || !gistId) {
                 showStatus('请先设置同步', 'error');
@@ -276,33 +381,28 @@
             }
             
             try {
-                const entries = JSON.parse(localStorage.getItem('diaryEntries') || []);
-                const res = await fetch(`https://api.github.com/gists/${gistId}`, {
-                    method: 'PATCH',
-                    headers: {
-                        'Authorization': `token ${githubToken}`,
-                        'Accept': 'application/vnd.github.v3+json',
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        files: {
-                            [DIARY_GIST_FILENAME]: {
-                                content: JSON.stringify({
-                                    entries: entries,
-                                    updatedAt: new Date().toISOString()
-                                })
-                            }
-                        }
-                    })
-                });
+                // 获取远程数据
+                const remoteData = await getRemoteData();
                 
-                if (!res.ok) throw new Error(await res.text());
+                // 检查冲突
+                if (remoteData.updatedAt !== localStorage.getItem('lastSyncedAt') && 
+                    !isFirstDevice) {
+                    showConflictUI(remoteData.entries);
+                    return;
+                }
+                
+                // 无冲突，直接同步
+                const entries = JSON.parse(localStorage.getItem('diaryEntries') || []);
+                await updateRemoteData(entries);
+                
                 showStatus('同步成功: ' + new Date().toLocaleString(), 'success');
+                localStorage.setItem('lastSyncedAt', new Date().toISOString());
             } catch (error) {
                 showStatus('同步失败: ' + error.message, 'error');
             }
         }
         
+        // 从GitHub加载
         async function loadFromGithub() {
             if (!githubToken || !gistId) {
                 showStatus('请先设置同步', 'error');
@@ -310,24 +410,126 @@
             }
             
             try {
-                const res = await fetch(`https://api.github.com/gists/${gistId}`, {
-                    headers: {
-                        'Authorization': `token ${githubToken}`,
-                        'Accept': 'application/vnd.github.v3+json'
-                    }
-                });
+                const remoteData = await getRemoteData();
                 
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.message || "加载失败");
+                // 合并数据
+                const localEntries = JSON.parse(localStorage.getItem('diaryEntries') || []);
+                const mergedEntries = mergeEntries(localEntries, remoteData.entries);
                 
-                const content = data.files[DIARY_GIST_FILENAME].content;
-                const parsed = JSON.parse(content);
+                localStorage.setItem('diaryEntries', JSON.stringify(mergedEntries));
+                localStorage.setItem('lastSyncedAt', remoteData.updatedAt);
                 
-                localStorage.setItem('diaryEntries', JSON.stringify(parsed.entries));
-                showStatus('加载成功! 最后更新: ' + new Date(parsed.updatedAt).toLocaleString(), 'success');
+                showStatus('加载成功! 最后更新: ' + new Date(remoteData.updatedAt).toLocaleString(), 'success');
                 loadEntries();
             } catch (error) {
                 showStatus('加载失败: ' + error.message, 'error');
+            }
+        }
+        
+        // 获取远程数据
+        async function getRemoteData() {
+            const response = await fetch(`https://api.github.com/gists/${gistId}`, {
+                headers: {
+                    'Authorization': `token ${githubToken}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.message || "获取失败");
+            
+            const content = data.files[DIARY_GIST_FILENAME].content;
+            return JSON.parse(content);
+        }
+        
+        // 更新远程数据
+        async function updateRemoteData(entries) {
+            const response = await fetch(`https://api.github.com/gists/${gistId}`, {
+                method: 'PATCH',
+                headers: {
+                    'Authorization': `token ${githubToken}`,
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    files: {
+                        [DIARY_GIST_FILENAME]: {
+                            content: JSON.stringify({
+                                entries: entries,
+                                updatedAt: new Date().toISOString(),
+                                lastSyncBy: currentDeviceId
+                            })
+                        }
+                    }
+                })
+            });
+            if (!response.ok) throw new Error(await response.text());
+        }
+        
+        // 合并条目
+        function mergeEntries(localEntries, remoteEntries) {
+            const entryMap = new Map();
+            
+            // 添加远程条目
+            remoteEntries.forEach(entry => {
+                const key = `${entry.date}_${entry.content.substring(0, 50)}`;
+                entryMap.set(key, entry);
+            });
+            
+            // 添加本地条目（会覆盖重复的远程条目）
+            localEntries.forEach(entry => {
+                const key = `${entry.date}_${entry.content.substring(0, 50)}`;
+                entryMap.set(key, entry);
+            });
+            
+            return Array.from(entryMap.values());
+        }
+        
+        // 显示冲突解决UI
+        function showConflictUI(remoteEntries) {
+            const localEntries = JSON.parse(localStorage.getItem('diaryEntries') || []);
+            
+            elements.conflictEntries.innerHTML = `
+                <p>本地有 ${localEntries.length} 条未同步日记</p>
+                <p>云端有 ${remoteEntries.length} 条新日记</p>
+                <div class="conflict-entry">
+                    <strong>示例日记:</strong><br>
+                    本地: ${localEntries[0]?.content || '无'}<br>
+                    云端: ${remoteEntries[0]?.content || '无'}
+                </div>
+            `;
+            
+            elements.conflictResolver.style.display = 'block';
+            showStatus('发现数据冲突，请选择解决方式', 'error');
+        }
+        
+        // 解决冲突
+        async function resolveConflict(strategy) {
+            try {
+                const remoteData = await getRemoteData();
+                const localEntries = JSON.parse(localStorage.getItem('diaryEntries') || []);
+                let finalEntries;
+                
+                switch(strategy) {
+                    case 'local':
+                        finalEntries = localEntries;
+                        break;
+                    case 'remote':
+                        finalEntries = remoteData.entries;
+                        break;
+                    case 'merge':
+                        finalEntries = mergeEntries(localEntries, remoteData.entries);
+                        break;
+                }
+                
+                // 更新本地和远程
+                localStorage.setItem('diaryEntries', JSON.stringify(finalEntries));
+                await updateRemoteData(finalEntries);
+                
+                elements.conflictResolver.style.display = 'none';
+                showStatus('冲突已解决，数据已同步', 'success');
+                loadEntries();
+            } catch (error) {
+                showStatus('解决冲突失败: ' + error.message, 'error');
             }
         }
         
