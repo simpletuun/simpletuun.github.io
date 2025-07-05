@@ -1,18 +1,56 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>我的日记时间线</title>
+    <title>密码保护的日记时间线</title>
     <style>
-        body { font-family: Arial; max-width: 800px; margin: 0 auto; }
-        .timeline { margin: 20px 0; }
+        body { font-family: Arial; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .timeline { margin: 20px 0; display: none; }
         .entry { border-left: 3px solid #4CAF50; padding: 10px 20px; margin: 20px 0; }
         .date { color: #666; font-size: 0.9em; }
         .content { margin-top: 5px; }
         textarea { width: 100%; height: 100px; }
+        #passwordBtn { 
+            background-color: #FFD700;
+            color: #000;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 20px 0;
+        }
+        #passwordInput {
+            padding: 8px;
+            margin-right: 10px;
+            width: 200px;
+        }
+        .password-form {
+            margin: 20px 0;
+            text-align: center;
+        }
+        .import-export {
+            margin: 30px 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            border-radius: 5px;
+        }
+        .import-export h2 {
+            margin-top: 0;
+        }
+        #importData {
+            width: 100%;
+            height: 100px;
+            margin: 10px 0;
+        }
     </style>
 </head>
 <body>
-    <h1>我的日记</h1>
+    <h1>我的私密日记</h1>
+    
+    <div class="password-form">
+        <input type="password" id="passwordInput" placeholder="输入密码查看日记">
+        <button id="passwordBtn" onclick="checkPassword()">解锁日记</button>
+    </div>
     
     <div>
         <h2>写新日记</h2>
@@ -21,47 +59,149 @@
         <button onclick="addEntry()">保存日记</button>
     </div>
     
+    <div class="import-export">
+        <h2>数据导入/导出</h2>
+        <h3>导出日记</h3>
+        <button onclick="exportEntries()">导出所有日记</button>
+        <p id="exportOutput"></p>
+        
+        <h3>导入日记</h3>
+        <textarea id="importData" placeholder="粘贴导出的JSON数据"></textarea><br>
+        <button onclick="importEntries()">导入数据</button>
+        <p id="importStatus"></p>
+    </div>
+    
     <div class="timeline" id="timeline">
         <!-- 日记会显示在这里 -->
     </div>
 
     <script>
-        // 加载保存的日记
-        function loadEntries() {
-            const entries = JSON.parse(localStorage.getItem('diaryEntries') || '[]');
-            const timeline = document.getElementById('timeline');
-            
-            entries.forEach(entry => {
-                timeline.innerHTML += `
-                    <div class="entry">
-                        <div class="date">${entry.date}</div>
-                        <div class="content">${entry.content}</div>
-                    </div>
-                `;
-            });
+        // 密码设置
+        const CORRECT_PASSWORD = "abc";
+        
+        // 检查密码函数
+        window.checkPassword = function() {
+            const input = document.getElementById('passwordInput').value;
+            if(input === CORRECT_PASSWORD) {
+                document.getElementById('timeline').style.display = 'block';
+                loadEntries();
+            } else {
+                alert("密码错误！");
+            }
         }
         
-        // 添加新日记
-        function addEntry() {
+        // 加载日记函数
+        function loadEntries() {
+            try {
+                const entriesData = localStorage.getItem('diaryEntries');
+                const entries = entriesData ? JSON.parse(entriesData) : [];
+                const timeline = document.getElementById('timeline');
+                timeline.innerHTML = '';
+                
+                entries.forEach(entry => {
+                    timeline.innerHTML += `
+                        <div class="entry">
+                            <div class="date">${entry.date}</div>
+                            <div class="content">${entry.content}</div>
+                        </div>
+                    `;
+                });
+            } catch (error) {
+                console.error('加载日记出错:', error);
+            }
+        }
+        
+        // 添加日记函数
+        window.addEntry = function() {
             const date = document.getElementById('entryDate').value;
             const content = document.getElementById('entryContent').value;
             
-            if (!date || !content) return;
+            if (!date || !content) {
+                alert("请填写日期和内容！");
+                return;
+            }
             
-            const entries = JSON.parse(localStorage.getItem('diaryEntries') || '[]');
-            entries.unshift({ date, content });
-            localStorage.setItem('diaryEntries', JSON.stringify(entries));
-            
-            // 刷新显示
-            document.getElementById('timeline').innerHTML = '';
-            loadEntries();
-            
-            // 清空输入
-            document.getElementById('entryContent').value = '';
+            try {
+                const currentEntries = JSON.parse(
+                    localStorage.getItem('diaryEntries') || '[]'
+                );
+                currentEntries.unshift({ date, content });
+                localStorage.setItem('diaryEntries', JSON.stringify(currentEntries));
+                
+                document.getElementById('entryContent').value = '';
+                
+                if(document.getElementById('timeline').style.display === 'block') {
+                    loadEntries();
+                }
+            } catch (error) {
+                console.error('保存日记出错:', error);
+                alert('保存失败，请检查控制台');
+            }
         }
         
-        // 页面加载时显示已有日记
-        window.onload = loadEntries;
+        // 导出日记函数
+        function exportEntries() {
+            try {
+                const entries = localStorage.getItem('diaryEntries');
+                if (!entries) {
+                    document.getElementById('exportOutput').textContent = "没有可导出的日记";
+                    return;
+                }
+                
+                // 格式化JSON以便阅读
+                const formattedJson = JSON.stringify(JSON.parse(entries), null, 2);
+                document.getElementById('exportOutput').textContent = formattedJson;
+                
+                // 自动选中文本方便复制
+                const range = document.createRange();
+                range.selectNode(document.getElementById('exportOutput'));
+                window.getSelection().removeAllRanges();
+                window.getSelection().addRange(range);
+                
+                alert("日记已显示在下方，请复制文本保存");
+            } catch (error) {
+                console.error('导出失败:', error);
+                document.getElementById('exportOutput').textContent = "导出失败: " + error.message;
+            }
+        }
+        
+        // 导入日记函数
+        function importEntries() {
+            try {
+                const importData = document.getElementById('importData').value.trim();
+                if (!importData) {
+                    alert("请粘贴要导入的JSON数据");
+                    return;
+                }
+                
+                // 验证JSON格式
+                const parsedData = JSON.parse(importData);
+                if (!Array.isArray(parsedData)) {
+                    throw new Error("数据格式不正确，应为日记数组");
+                }
+                
+                // 合并现有数据（可选，可根据需求修改）
+                const currentEntries = JSON.parse(
+                    localStorage.getItem('diaryEntries') || '[]'
+                );
+                const combinedEntries = [...parsedData, ...currentEntries];
+                
+                localStorage.setItem('diaryEntries', JSON.stringify(combinedEntries));
+                document.getElementById('importStatus').textContent = `成功导入 ${parsedData.length} 条日记，现有 ${combinedEntries.length} 条日记`;
+                
+                if(document.getElementById('timeline').style.display === 'block') {
+                    loadEntries();
+                }
+            } catch (error) {
+                console.error('导入失败:', error);
+                document.getElementById('importStatus').textContent = "导入失败: " + error.message;
+            }
+        }
+        
+        // 初始化检查
+        if (!localStorage.getItem('diaryEntries')) {
+            localStorage.setItem('diaryEntries', JSON.stringify([]));
+        }
     </script>
 </body>
 </html>
